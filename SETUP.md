@@ -201,6 +201,7 @@ Profile (admins) shows photo storage used, out of the free 1 GB. At **800 MB** i
 | 62 | Search boxes in Places, People and Activity show when they are filtering: blue with an × to clear; Places and People add a "Showing n of m · filters · “text” · Clear" line; a kept search glows once when you come back to it | Nothing to run |
 | 63 | Report **History**: when the admin sends a report back or unverifies it, the version at that moment is kept; the report page then shows what changed (old → new) and who did it, with the reason. Edits before the admin acts are not recorded; deleted photos are not kept (only the photo count). Unverify asks for an optional reason. Seen by those who can see the full report | Run `sql/22_update_v63.sql`. History starts from then. Older app versions keep working without History |
 | 64 | Profile rearranged: Sign out comes right after About / Sync; "Phones and Gmails that open your profile" moved below it as one row (with a count) that opens its own panel; its Remove buttons are no longer red | Nothing to run |
+| 65 | Dashboard → Officers: a one-line summary and the 5 officers most behind (with WhatsApp / Call); **See all N officers** opens a panel with search, branch, Overdue / All pills and sorting (most overdue, lowest coverage, most visits, A–Z) | Nothing to run |
 
 ---
 

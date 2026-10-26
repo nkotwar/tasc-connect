@@ -144,9 +144,9 @@ async function viewDashboard(force = false) {
       </tbody></table></div>
     </div>
 
-    <div class="card"><h3>Officers</h3>
-      <div class="chips" style="margin-top:0" id="offc">${offChips(M)}</div>
-      <div class="list" id="offl">${offRows(M)}</div>
+    <div class="card"><h3>Officers</h3>${offSummary(M)}
+      <div class="list" id="offl">${offRows(M, M.byOff.filter(offDue).slice(0, 5))}</div>
+      <button class="btn ghost block small" id="offall" style="margin-top:10px">See all ${M.byOff.length} officers ›</button>
     </div>
 
     <div class="card"><h3>Overdue ageing</h3>
@@ -231,6 +231,45 @@ function overdueMsg(o) {
   return `Dear ${o.name}, ${n} visit${n > 1 ? 's' : ''} allotted to you ${n > 1 ? 'are' : 'is'} pending in TASC Connect:\n${list}${n > 6 ? `\n…and ${n - 6} more` : ''}\nKindly visit and submit the visit report: ${daoraLink()}\n– Regional Office, Udaipur`;
 }
 const offDue = o => o.overdue || o.today;
+/* Dashboard card: a one-line summary and the 5 most behind; everyone else in a panel (search, branch, sort) */
+function offSummary(M) {
+  const late = M.byOff.filter(o => o.overdue).length, today = M.byOff.filter(o => o.today).length;
+  return late || today ? `<p class="muted" style="margin:-2px 0 8px">${late ? `<b>${late}</b> officer${late > 1 ? 's have' : ' has'} overdue visits` : ''}${late && today ? ' · ' : ''}${today ? `<b>${today}</b> ${today > 1 ? 'have' : 'has'} visits due today` : ''}</p>` : '';
+}
+const OFF_SORT = {
+  late: ['Most overdue', (a, b) => b.overdue - a.overdue || b.today - a.today || a.name.localeCompare(b.name)],
+  cov: ['Lowest coverage', (a, b) => (a.total ? a.visited / a.total : 2) - (b.total ? b.visited / b.total : 2) || b.overdue - a.overdue || a.name.localeCompare(b.name)],
+  most: ['Most visits', (a, b) => (b.visited + b.own) - (a.visited + a.own) || a.name.localeCompare(b.name)],
+  az: ['A–Z', (a, b) => a.name.localeCompare(b.name)]
+};
+function openOfficers(M) {
+  const st = S.cache.offAll || (S.cache.offAll = { q: '', br: '', f: 'due', sort: 'late' });
+  const branches = M.byBranch.filter(b => M.byOff.some(o => (S.dir.get(o.emp) || {}).branch_code === b.code));
+  const body = openSheet('Officers', `
+    <div class="row" style="gap:8px;margin-bottom:10px">
+      <select class="input dsel" id="oa-br" aria-label="Branch"><option value="">Branch: all</option>${branches.map(b => `<option value="${b.code}" ${String(b.code) === st.br ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>
+      <select class="input dsel" id="oa-so" aria-label="Sort">${Object.entries(OFF_SORT).map(([k, v]) => `<option value="${k}" ${st.sort === k ? 'selected' : ''}>${v[0]}</option>`).join('')}</select></div>
+    ${searchHTML('oa-q', 'Name or emp ID', st.q)}
+    <div class="chips" id="oa-f"></div>
+    <div class="hint sline" id="oa-s" hidden></div>
+    <div class="list" id="oa-l"></div>`);
+  const draw = () => {
+    st.q = $('#oa-q', body).value.trim(); st.br = $('#oa-br', body).value; st.sort = $('#oa-so', body).value;
+    const inBr = M.byOff.filter(o => !st.br || String((S.dir.get(o.emp) || {}).branch_code) === st.br);
+    const base = st.f === 'due' ? inBr.filter(offDue) : inBr;
+    const t = st.q.toLowerCase();
+    const list = base.filter(o => !t || (o.name + ' ' + o.emp).toLowerCase().includes(t)).sort(OFF_SORT[st.sort][1]);
+    $('#oa-f', body).innerHTML = `<button class="chip ${st.f === 'due' ? 'on' : ''}" data-f="due">Overdue / due today<b>${inBr.filter(offDue).length}</b></button><button class="chip ${st.f === 'all' ? 'on' : ''}" data-f="all">All<b>${inBr.length}</b></button>`;
+    $$('#oa-f [data-f]', body).forEach(b => b.onclick = () => { st.f = b.dataset.f; draw(); });
+    searchSummary($('#oa-s', body), { shown: list.length, of: base.length, noun: 'officers', filters: [st.f === 'due' && 'Overdue / due today', st.br && M.bname.get(+st.br)], q: st.q,
+      onClear: () => { $('#oa-q', body).value = ''; $('#oa-q', body).dispatchEvent(new Event('input')); } });
+    $('#oa-l', body).innerHTML = list.length ? offRows(M, list) : `<div class="empty">${t ? 'No officer by that name.' : st.f === 'due' ? 'Nothing overdue or due today. 🎉' : 'No officers here.'}</div>`;
+    $$('[data-off]', $('#oa-l', body)).forEach(b => b.onclick = () => (S.who.admin ? openStaff(+b.dataset.off) : openOfficer(+b.dataset.off)));
+  };
+  $('#oa-q', body).oninput = draw; bindSearch($('#oa-q', body), draw);
+  $('#oa-br', body).onchange = draw; $('#oa-so', body).onchange = draw;
+  draw();
+}
 function offChips(M) {
   const f = S.cache.offF === 'all' ? 'all' : 'due';
   return `<button class="chip ${f === 'due' ? 'on' : ''}" data-of="due">Overdue / due today<b>${M.byOff.filter(offDue).length}</b></button>`
@@ -248,6 +287,7 @@ function offRows(M, list) {
 }
 /* Officer pills redraw only the list, not the whole dashboard */
 function bindOfficers(M, root = document) {
+  const all = $('#offall', root); if (all) all.onclick = () => openOfficers(M);
   const wire = () => $$('[data-off]', $('#offl', root) || root).forEach(b => b.onclick = () => (S.who.admin ? openStaff(+b.dataset.off) : openOfficer(+b.dataset.off)));
   $$('#offc [data-of]', root).forEach(b => b.onclick = () => { S.cache.offF = b.dataset.of; $('#offc', root).innerHTML = offChips(M); $('#offl', root).innerHTML = offRows(M); bindOfficers(M, root); });
   wire();
