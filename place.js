@@ -344,7 +344,9 @@ async function openVisit(id) {
       ${kv('Verified', v.verified_at ? `${esc(v.verified_by ? personName(v.verified_by) : 'Admin')} · ${fmtDateTime(v.verified_at)}` : '')}
     </dl>
     ${pending ? `<div class="note warn" style="margin-top:12px">Your ${pending} request is waiting with the admin.</div>` : ''}
+    <div id="v-hist"></div>
     <div class="stack" style="margin-top:16px" id="v-acts"></div>`;
+  loadHistory($('#v-hist', body), v, photos, joint);
 
   const acts = [];
   if (canVerify) acts.push(`<div class="row"><button class="btn grow" id="va-ver">✓ Verify</button><button class="btn ghost grow" id="va-back" style="color:var(--bad)">↩ Send back</button></div>`);
@@ -376,8 +378,19 @@ async function openVisit(id) {
     catch (e) { toast(errText(e)); openVisit(v.id); }
   });
   on('#va-unv', async () => {
-    try { await rpc('unverify_visit', { p_visit: v.id }); patch('visits', v.id, { status: 'submitted', verified_at: null, verified_by: null }); toast('Unverified: the visitor can edit it again'); openVisit(v.id); }
-    catch (e) { toast(errText(e)); } });
+    const why = await new Promise(res => {
+      const b2 = openSheet('Unverify this report?', `<p class="muted" style="margin-top:0">${esc(personName(v.visitor))} can then edit it, and it waits for verification again. The verified version is kept in its History.</p>
+        <label class="f" for="uv-n">Reason <span class="hint">(optional)</span></label><input class="input" id="uv-n" placeholder="e.g. Wrong account number">
+        <div class="row" style="margin-top:14px"><button class="btn ghost grow" id="uv-no">Cancel</button><button class="btn grow" id="uv-ok">Unverify</button></div>`, () => res(null));
+      $('#uv-no', b2).onclick = () => res(null);
+      $('#uv-ok', b2).onclick = () => res({ t: $('#uv-n', b2).value.trim() });
+    });
+    if (!why) return openVisit(v.id);
+    try {
+      try { await rpc('unverify_visit', { p_visit: v.id, p_reason: why.t || null }); }
+      catch (e) { if (!/unverify_visit|PGRST202|schema cache|function/i.test(String(e && (e.message || e.code)))) throw e; await rpc('unverify_visit', { p_visit: v.id }); }   // database not updated yet: no reason
+      patch('visits', v.id, { status: 'submitted', verified_at: null, verified_by: null }); toast('Unverified: the visitor can edit it again'); openVisit(v.id);
+    } catch (e) { toast(errText(e)); openVisit(v.id); } });
   on('#va-edit', () => openVisitForm({ entity: ent, visit: v, photos: photos.map(p => ({ id: p.id, path: p.path, url: urls[p.path], source: p.source })), joint: joint.map(j => j.emp_id) }));
   on('#va-del', async () => {
     if (!await confirmSheet('Delete this visit?', 'The visit and its photos are removed for good.', 'Delete', true)) return openVisit(v.id);
@@ -389,6 +402,44 @@ async function openVisit(id) {
   });
   on('#va-rdel', () => askRequest('delete_visit', v.id, null, 'Ask to delete this visit', 'Why should this visit be deleted?'));
   on('#va-runv', () => askRequest('unverify', v.id, null, 'Ask to unverify', 'What do you need to correct?'));
+}
+
+/* ───────── a report's History: kept when the admin sends it back or unverifies it ───────── */
+const HIST_FIELDS = [
+  ['visited_at', 'Visit time', x => x ? fmtDateTime(x) : ''], ['person_name', 'Person met'], ['person_designation', 'Designation'], ['person_mobile', 'Mobile'],
+  ['banking_with', 'Banks with', x => ({ us: 'Our bank', other: 'Other bank', none: 'None / not known' }[x] || '')], ['other_bank', 'Which bank'],
+  ['headcount', 'Headcount'], ['potential_rs', 'Business potential', x => x == null || x === '' ? '' : inr(x)], ['products', 'Products', x => (x || []).join(', ')],
+  ['outcome', 'Outcome'], ['remarks', 'Remarks'], ['next_step', 'Next step'], ['followup_on', 'Follow-up date', x => x ? fmtDate(x) : ''],
+  ['closure', 'Lead status', x => closureLabel(x) || 'Open'], ['closure_note', 'Closure note'], ['mobilised_rs', 'Business mobilised', x => x == null || x === '' ? '' : inr(x)],
+  ['account_numbers', 'Accounts opened', x => (x || []).join(', ')], ['existing_accounts', 'Existing accounts', x => (x || []).join(', ')],
+  ['_loc', 'Location', (x, o) => o.lat != null ? `${(+o.lat).toFixed(5)}, ${(+o.lng).toFixed(5)}` : 'Not recorded'],
+  ['joint', 'Joint visit with', x => (x || []).map(e => cleanName(personName(e))).join(', ')], ['photo_count', 'Photos', x => x == null ? '' : String(x)]
+];
+function histDiff(a, b) {
+  return HIST_FIELDS.map(([k, label, fmt]) => {
+    const f = fmt || (x => x == null ? '' : String(x));
+    const x = f(a[k], a), y = f(b[k], b);
+    return x === y ? '' : `<div class="s" style="margin-top:3px"><b>${label}:</b> <span style="text-decoration:line-through;opacity:.7">${esc(x || '—')}</span> → ${esc(y || '—')}</div>`;
+  }).join('');
+}
+async function loadHistory(el, v, photos, joint) {
+  if (!el) return;
+  let rows;
+  try { rows = await rpc('visit_history', { p_visit: v.id }); } catch (e) { return; }   // database not updated yet: no History
+  if (!rows || !rows.length || !el.isConnected) return;
+  const now = { ...v, photo_count: photos.length, joint: joint.map(j => j.emp_id).sort((a, b) => a - b) };
+  el.innerHTML = `<h2>History</h2><div class="list">${rows.slice().reverse().map((h, ri) => {
+    const i = rows.length - 1 - ri, next = rows[i + 1] ? rows[i + 1].snapshot : now, last = !rows[i + 1];
+    const s = h.snapshot, what = h.kind === 'returned' ? 'Sent back' : 'Unverified';
+    const who = h.by_emp ? cleanName(personName(h.by_emp)) : 'Admin';
+    const waiting = last && h.kind === 'returned' && v.status === 'returned';
+    const diff = waiting ? '' : histDiff({ ...s, joint: (s.joint || []).slice().sort((a, b) => a - b) }, next);
+    return `<div class="item" style="cursor:default;align-items:flex-start"><div class="grow">
+      <div class="t">${what} · ${fmtDateTime(h.at)}</div><div class="s">by ${esc(who)}${h.reason ? ` · “${esc(h.reason)}”` : ''}</div>
+      ${waiting ? '<div class="s" style="margin-top:4px">Not resubmitted yet.</div>'
+        : diff ? `<div class="s" style="margin-top:6px">${h.kind === 'returned' ? 'Changes when resubmitted:' : 'Changes made after unverifying:'}</div>${diff}`
+        : '<div class="s" style="margin-top:4px">No changes made.</div>'}
+    </div><span class="badge ${h.kind === 'returned' ? 'bad' : 'warn'}">${what}</span></div>`; }).join('')}</div>`;
 }
 
 async function deleteVisitWithPhotos(id, photos) {

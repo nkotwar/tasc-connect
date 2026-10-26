@@ -199,6 +199,7 @@ Profile (admins) shows photo storage used, out of the free 1 GB. At **800 MB** i
 | 60 | Admin → Verify lists reports in the order they were submitted (oldest first) and shows when each was submitted | Nothing to run |
 | 61 | Reassign requests: **Reassign…** opens the same picker as Reallot (search with each person's pending load, Visit by date, note for staff) plus a reply to the requester; the requester is not offered. Pending requests are unaffected. The Campaign box no longer shows when changing an existing allotment (it was never changed there) | Nothing to run |
 | 62 | Search boxes in Places, People and Activity show when they are filtering: blue with an × to clear; Places and People add a "Showing n of m · filters · “text” · Clear" line; a kept search glows once when you come back to it | Nothing to run |
+| 63 | Report **History**: when the admin sends a report back or unverifies it, the version at that moment is kept; the report page then shows what changed (old → new) and who did it, with the reason. Edits before the admin acts are not recorded; deleted photos are not kept (only the photo count). Unverify asks for an optional reason. Seen by those who can see the full report | Run `sql/22_update_v63.sql`. History starts from then. Older app versions keep working without History |
 
 ---
 
