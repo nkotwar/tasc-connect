@@ -693,7 +693,7 @@ async function exportExcel(M, D) {
   const photosOf = id => all('photos').filter(p => p.visit_id === id).length;
   const viRows = M.vis.slice().sort((a, b) => a.visited_at.localeCompare(b.visited_at)).map(v => [
     v.entity.name, v.entity.type, v.entity.area || '', v.visit_no, personName(v.visitor), v.visitor, M.bname.get(v.visitor_branch) || '',
-    d(v.visited_at), d(v.logged_at), v.assignment_id ? 'Yes' : 'No', jointOf(v.id),
+    d(v.visited_at), d(v.logged_at), v.created_by_admin ? 'Yes' : '', v.assignment_id ? 'Yes' : 'No', jointOf(v.id),
     v.person_name || '', v.person_designation || '', v.person_mobile || '',
     { us: 'Our bank', other: 'Other bank', none: 'None / not known' }[v.banking_with] || '', v.other_bank || '',
     v.potential_rs != null ? +v.potential_rs : '', (v.products || []).join(', '), v.outcome || '', v.remarks || '', v.next_step || '',
@@ -701,7 +701,7 @@ async function exportExcel(M, D) {
     photosOf(v.id), v.lat != null ? `${(+v.lat).toFixed(5)}, ${(+v.lng).toFixed(5)}` : '',
     v.status === 'verified' ? 'Verified' : v.status === 'returned' ? 'Sent back' : 'Submitted', d(v.verified_at) || '', v.verified_at ? (v.verified_by ? personName(v.verified_by) : 'Admin') : '']);
   const wsVi = table('Visit reports', [{ h: 'Place', w: 40, t: 'text' }, { h: 'Type', w: 20, t: 'text' }, { h: 'Area', w: 16, t: 'text' }, { h: 'Visit no', w: 8, t: 'int' },
-    { h: 'Visited by', w: 26, t: 'text' }, { h: 'Emp ID', w: 9, t: 'int' }, { h: 'Branch', w: 18, t: 'text' }, { h: 'Visited at', w: 17, t: 'dt' }, { h: 'Submitted at', w: 17, t: 'dt' },
+    { h: 'Visited by', w: 26, t: 'text' }, { h: 'Emp ID', w: 9, t: 'int' }, { h: 'Branch', w: 18, t: 'text' }, { h: 'Visited at', w: 17, t: 'dt' }, { h: 'Submitted at', w: 17, t: 'dt' }, { h: 'Entered by admin', w: 10, t: 'text' },
     { h: 'Allotted', w: 9, t: 'text' }, { h: 'Joint visit with', w: 24, t: 'text' }, { h: 'Person met', w: 22, t: 'text' }, { h: 'Designation', w: 18, t: 'text' },
     { h: 'Mobile', w: 13, t: 'text' }, { h: 'Banks with', w: 14, t: 'text' }, { h: 'Other bank', w: 16, t: 'text' }, { h: 'Potential', w: 14, t: 'inr' },
     { h: 'Products', w: 30, t: 'text' }, { h: 'Outcome', w: 18, t: 'text' }, { h: 'Remarks', w: 40, t: 'text' }, { h: 'Next step', w: 30, t: 'text' },

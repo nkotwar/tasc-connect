@@ -318,7 +318,7 @@ async function openVisit(id) {
     <div class="row wrap" style="margin-bottom:12px">
       <span class="badge ${v.status === 'verified' ? 'ok' : back ? 'bad' : 'warn'}">${v.status === 'verified' ? 'Verified' : back ? 'Sent back for changes' : 'Submitted, not yet verified'}</span>
       ${v.closure ? `<span class="badge ${v.closure === 'account_opened' ? 'ok' : v.closure === 'existing_customer' ? 'acc' : 'bad'}">${closureLabel(v.closure)}</span>` : ''}
-      ${v.assignment_id ? '<span class="badge acc">Allotted</span>' : '<span class="badge">Self-initiated</span>'}</div>
+      ${v.assignment_id ? '<span class="badge acc">Allotted</span>' : '<span class="badge">Self-initiated</span>'}${v.created_by_admin ? '<span class="badge warn">Entered by admin</span>' : ''}</div>
     ${back ? `<div class="note bad" style="margin-bottom:12px"><b>Sent back by the Regional Office${v.returned_at ? ' · ' + fmtDateTime(v.returned_at) : ''}:</b> ${esc(v.return_note || '')}${mine ? '<br>Make the changes and save: it goes back for checking.' : ''}</div>`
       : v.resubmitted_at && v.status === 'submitted' ? `<div class="note" style="margin-bottom:12px">Resubmitted ${fmtDateTime(v.resubmitted_at)} after being sent back${v.return_note ? `: "${esc(v.return_note)}"` : ''}.</div>` : ''}
     ${photos.length ? `<div class="pgrid" style="margin-bottom:14px">${photos.map(p => `<a class="pthumb" href="${urls[p.path] || '#'}" target="_blank" rel="noopener"><img src="${turls[p.path] || urls[p.path] || ''}" alt="Visit photo" loading="lazy"><span class="ptag">${p.source === 'capture' ? 'Live' : 'Uploaded'}</span></a>`).join('')}</div>` : ''}

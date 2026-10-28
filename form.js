@@ -21,6 +21,12 @@ async function openVisitForm(opts) {
     outcomeTouched: false, visit0: v,
     joint: new Set(opts.joint || []), photos: (opts.photos || []).map(p => ({ ...p, existing: true })), removed: []
   };
+  /* Admin can submit for someone else: their visit, their credit. Default: the person the place is allotted to. */
+  const myEmp = me ? me.emp_id : null;
+  const allottee = (openAsgAll().find(a => a.entity_id === opts.entity.id && a.assignee !== myEmp) || {}).assignee;
+  F.visitor = v.id ? v.visitor : (opts.onBehalf || (S.who.admin && allottee && !opts.assignment ? allottee : myEmp));
+  F.pickVisitor = S.who.admin && F.isNew;
+  F.myEmp = myEmp;
   const no = v.visit_no || opts.nextNo || 1;
   const title = (F.isNew ? (no > 1 ? `Follow-up · Visit ${no}` : 'Submit Visit Report') : `Edit Visit ${no}`);
   const body = openSheet(title, formHTML(F, no));
@@ -34,6 +40,9 @@ function formHTML(F, no) {
   return `
   <div class="card" style="margin-bottom:14px"><div style="font-weight:650">${esc(e.name)}</div>
     <div class="hint">${esc(e.type)}${e.area ? ' · ' + esc(e.area) : ''}${no > 1 ? ` · Visit ${no}` : ''}</div></div>
+
+  ${F.pickVisitor ? `<div class="fs"><h4>Visited by</h4><div id="f-vby"></div></div>`
+    : F.visitor !== F.myEmp ? `<div class="note" style="margin-bottom:14px">Report of <b>${esc(personName(F.visitor))}</b>${F.isNew ? '' : ', entered by the admin'}.</div>` : ''}
 
   <div class="fs"><h4>When &amp; where</h4>
     <label class="f" for="f-when">Date and time of visit</label>
@@ -158,6 +167,31 @@ function bindForm(body, F) {
   $b('#f-pot').oninput = potw; potw();
   $$('#f-prod .chip', body).forEach(c => c.onclick = () => { const p = c.dataset.p; F.products.has(p) ? F.products.delete(p) : F.products.add(p); c.classList.toggle('on'); });
 
+  // visited by (admin only, new report)
+  const drawVby = (searching) => {
+    const el = $b('#f-vby'); if (!el) return;
+    const p = S.dir.get(F.visitor) || {}, isMe = F.visitor === F.myEmp;
+    const asgTo = openAsgAll().filter(a => a.entity_id === F.entity.id).map(a => a.assignee);
+    const note = isMe ? '<p class="hint" style="margin:6px 0 0">Your own visit.</p>'
+      : `<p class="hint" style="margin:6px 0 0">Counts as <b>${esc(personName(F.visitor))}</b>'s visit and shows in their visits, marked "Entered by admin".${asgTo.length && !asgTo.includes(F.visitor) ? ` This place is allotted to ${asgTo.map(e => esc(personName(e))).join(', ')}: that allotment will show as visited by a colleague.` : ''}</p>`;
+    el.innerHTML = searching ? `${searchHTML('f-vq', 'Name, Emp ID or branch', '')}<div class="list" id="f-vl"></div>`
+      : `<div class="item" style="cursor:default"><div class="avatar">${esc(initials(isMe ? (S.who.me || {}).name || 'Me' : p.name || ''))}</div>
+          <div class="grow"><div class="t">${isMe ? 'Me' : esc(cleanName(p.name || 'Emp ' + F.visitor))}</div><div class="s">${esc(p.designation || '')}${p.branch ? ' · ' + esc(p.branch) : ''}</div></div>
+          <button type="button" class="btn small ghost" id="f-vch">Change</button></div>${note}`;
+    if (!searching) { $b('#f-vch').onclick = () => drawVby(true); return; }
+    const q = $b('#f-vq');
+    const list = () => {
+      const t = q.value.trim().toLowerCase();
+      const rows = [...S.dir.values()].filter(x => x.emp_id !== F.myEmp && (!t || (x.name + ' ' + (x.branch || '') + ' ' + x.emp_id).toLowerCase().includes(t)))
+        .sort((a, b) => (asgTo.includes(b.emp_id) - asgTo.includes(a.emp_id)) || cleanName(a.name).localeCompare(cleanName(b.name))).slice(0, t ? 30 : 8);
+      $b('#f-vl').innerHTML = (F.myEmp && !t ? `<button type="button" class="item" data-vb="${F.myEmp}"><div class="grow"><div class="t">Me</div><div class="s">My own visit</div></div></button>` : '')
+        + rows.map(x => `<button type="button" class="item" data-vb="${x.emp_id}"><div class="grow"><div class="t">${esc(cleanName(x.name))}</div><div class="s">${esc(x.designation || '')} · ${esc(x.branch || '')}${asgTo.includes(x.emp_id) ? ' · <b>allotted this place</b>' : ''}</div></div></button>`).join('');
+      $$('[data-vb]', body).forEach(b => b.onclick = () => { F.visitor = +b.dataset.vb; F.joint.delete(F.visitor); drawJoint(); drawVby(false); });
+    };
+    q.oninput = list; bindSearch(q, list); list(); setTimeout(() => q.focus(), 50);
+  };
+  drawVby(false);
+
   // joint visit picker
   const drawJoint = () => {
     $b('#f-joint').innerHTML = [...F.joint].map(e => `<button type="button" class="chip on" data-rmj="${e}">${esc(personName(e))} ✕</button>`).join('') || '<span class="hint">Nobody added.</span>';
@@ -167,7 +201,7 @@ function bindForm(body, F) {
   $b('#f-jq').oninput = () => {
     const t = $b('#f-jq').value.trim().toLowerCase(); const l = $b('#f-jl');
     if (t.length < 2) { l.hidden = true; return; }
-    const rows = [...S.dir.values()].filter(p => p.emp_id !== S.who.me.emp_id && !F.joint.has(p.emp_id) && (p.name + ' ' + (p.branch || '') + ' ' + p.emp_id).toLowerCase().includes(t)).slice(0, 8);
+    const rows = [...S.dir.values()].filter(p => p.emp_id !== F.visitor && !F.joint.has(p.emp_id) && (p.name + ' ' + (p.branch || '') + ' ' + p.emp_id).toLowerCase().includes(t)).slice(0, 8);
     l.hidden = !rows.length;
     l.innerHTML = rows.map(p => `<button type="button" class="item" data-addj="${p.emp_id}"><div class="grow"><div class="t">${esc(cleanName(p.name))}</div><div class="s">${esc(p.designation || '')} · ${esc(p.branch || '')}</div></div></button>`).join('');
     $$('[data-addj]', l).forEach(b => b.onclick = () => { F.joint.add(+b.dataset.addj); $b('#f-jq').value = ''; l.hidden = true; drawJoint(); });
@@ -254,7 +288,7 @@ function bindForm(body, F) {
     if (pos && (!F.pos || F.pos.lat == null)) { F.pos = { ...pos, source: 'gps', at: Date.now() }; $b('#f-loc').innerHTML = locText(F.pos); }
     const now = new Date();
     try {
-      const { blob } = await processPhoto(file, { place: F.entity.name, person: cleanName(S.who.me.name), when: now.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }), coords: pos ? fmtCoords(pos) : 'Location not available' });
+      const { blob } = await processPhoto(file, { place: F.entity.name, person: F.visitor === F.myEmp ? cleanName(S.who.me.name) : `${personName(F.visitor)} (by ${cleanName((S.who.me || {}).name || 'admin')})`, when: now.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }), coords: pos ? fmtCoords(pos) : 'Location not available' });
       F.photos.push({ id: uuid(), blob, preview: URL.createObjectURL(blob), source: 'capture', taken_at: now.toISOString(), lat: pos ? pos.lat : null, lng: pos ? pos.lng : null });
       drawPhotos();
     } catch (e) { toast(e.message || 'Could not add that photo'); }
@@ -276,6 +310,14 @@ function bindForm(body, F) {
   $b('#f-save').onclick = () => saveForm(body, F);
 }
 
+/* Which allotment a new report completes: the visitor's own open allotment for this place, if it has no report yet.
+   A report for someone the place isn't allotted to stays unlinked (the allotment then shows as visited by a colleague). */
+function asgFor(F) {
+  if (!F.isNew || F.visitor === F.myEmp) return F.assignment_id;
+  const done = new Set(all('visits').filter(x => x.assignment_id).map(x => x.assignment_id));
+  const a = openAsgAll().find(x => x.entity_id === F.entity.id && x.assignee === F.visitor && !done.has(x.id));
+  return a ? a.id : null;
+}
 async function saveForm(body, F) {
   const $b = s => $(s, body);
   const err = m => { $b('#f-err').textContent = m; $b('#f-err').scrollIntoView({ block: 'center', behavior: 'smooth' }); };
@@ -295,7 +337,7 @@ async function saveForm(body, F) {
   if (F.closure === 'existing_customer' && !exAccs.length) return err('Please enter their existing account number. It is needed when the outcome is Already our customer.');
   const num = id => { const x = $b(id).value; return x === '' ? null : Number(x); };
   const visit = {
-    entity_id: F.entity.id, assignment_id: F.assignment_id, visitor: S.who.me.emp_id,
+    entity_id: F.entity.id, assignment_id: asgFor(F), visitor: F.visitor,
     visited_at: new Date(when).toISOString(),
     lat: F.pos && F.pos.lat != null ? F.pos.lat : null, lng: F.pos && F.pos.lat != null ? F.pos.lng : null,
     accuracy_m: F.pos && F.pos.acc != null ? F.pos.acc : null, loc_source: F.pos && F.pos.lat != null ? 'gps' : 'none',
