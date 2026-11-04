@@ -180,6 +180,7 @@ async function viewDashboard(force = false) {
       <div class="stack">
         <button class="btn block" id="dx-img">Summary image for WhatsApp</button>
         <button class="btn ghost block" id="dx-pdf">Pending visits, staff-wise (PDF)</button>
+        <button class="btn ghost block" id="dx-arpan">Visit / outcome report (ARPAN format, Excel)</button>
         <button class="btn ghost block" id="dx-xls">Download Excel (all data)</button>
       </div>
       <p class="hint">The image and the Excel follow the filters above.</p>
@@ -197,6 +198,7 @@ async function viewDashboard(force = false) {
   $$('[data-v]', main).forEach(b => b.onclick = () => openVisit(b.dataset.v));
   $('#dx-img').onclick = () => askSummaryImage(M, f, D);
   $('#dx-xls').onclick = () => exportExcel(M, D);
+  $('#dx-arpan').onclick = () => askArpan(D);
   $('#dx-pdf').onclick = () => askPendingPdf(M, f, D);
   loadGallery(f, M);
 }
@@ -716,4 +718,103 @@ async function exportExcel(M, D) {
   XLSX.utils.book_append_sheet(wb, wsVi, 'Visit reports');
   XLSX.writeFile(wb, `TASC-Connect-${todayISO()}.xlsx`);
   toast('Excel downloaded');
+}
+
+/* ───────── Visit / outcome report in the Zonal Office's ARPAN format (one row per visit) ─────────
+   Admin and viewers. Pick types (Place of Worship only → "ARPAN CAMPAIGN…", anything else → "TASC CAMPAIGN…"),
+   a date range ("AS ON" = the end date), a branch, RO in or out, only verified or not. Sent-back reports and duplicates are left out. */
+const ARPAN_POW = 'Place of Worship';
+function arpanRows(D, o) {
+  const ro = new Set(D.branches.filter(b => b.is_ro).map(b => b.code));
+  return liveVisits().map(withEntity).filter(v => v.entity && v.status !== 'returned' && (!o.verified || v.status === 'verified')
+    && (!o.types.length || o.types.includes(v.entity.type)) && (!o.br || v.visitor_branch === o.br) && (o.ro || !ro.has(v.visitor_branch))
+    && (!o.from || localDay(v.visited_at) >= o.from) && (!o.to || localDay(v.visited_at) <= o.to))
+    .sort((a, b) => (a.visited_at || '').localeCompare(b.visited_at || ''));
+}
+function askArpan(D) {
+  const types = [...new Set(all('entities').filter(e => !e.is_duplicate).map(e => e.type).filter(Boolean))].sort();
+  const brs = D.branches.slice().sort((a, b) => (b.is_ro - a.is_ro) || a.name.localeCompare(b.name));
+  const o = S.cache.arpan || (S.cache.arpan = { types: types.includes(ARPAN_POW) ? [ARPAN_POW] : [], from: '', to: todayISO(), br: null, ro: false, verified: false });
+  const body = openSheet('Visit / outcome report', `
+    <p class="muted" style="margin-top:0">Excel in the reporting format: one row per visit, with who visited, who they met, contact and outcome.</p>
+    <label class="f">Type of institution</label><div class="chips" id="ar-t" style="margin-top:0;flex-wrap:wrap;overflow:visible"></div>
+    <div class="g2"><div><label class="f" for="ar-from">Visits from</label><input class="input" type="date" id="ar-from" value="${o.from}"></div>
+      <div><label class="f" for="ar-to">to (as on)</label><input class="input" type="date" id="ar-to" value="${o.to}" max="${todayISO()}"></div></div>
+    <label class="f" for="ar-br">Branch</label><select class="input" id="ar-br"><option value="">All branches</option>${brs.map(b => `<option value="${b.code}" ${o.br === b.code ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>
+    <label class="item" style="cursor:pointer"><div class="grow"><div class="t">Include Udaipur RO</div></div><input type="checkbox" id="ar-ro" ${o.ro ? 'checked' : ''} style="width:22px;height:22px"></label>
+    <label class="item" style="cursor:pointer"><div class="grow"><div class="t">Only verified visits</div><div class="s">Reports sent back for correction are always left out</div></div><input type="checkbox" id="ar-ver" ${o.verified ? 'checked' : ''} style="width:22px;height:22px"></label>
+    <p class="hint" id="ar-n"></p>
+    <button class="btn block" id="ar-go">Make Excel</button>`);
+  const read = () => { o.from = $('#ar-from', body).value; o.to = $('#ar-to', body).value || todayISO(); o.br = $('#ar-br', body).value ? +$('#ar-br', body).value : null; o.ro = $('#ar-ro', body).checked; o.verified = $('#ar-ver', body).checked; };
+  const draw = () => {
+    $('#ar-t', body).innerHTML = `<button class="chip ${!o.types.length ? 'on' : ''}" data-t="">All</button>` + types.map(t => `<button class="chip ${o.types.includes(t) ? 'on' : ''}" data-t="${esc(t)}">${esc(t)}</button>`).join('');
+    $$('#ar-t [data-t]', body).forEach(b => b.onclick = () => { const t = b.dataset.t; if (!t) o.types = []; else o.types = o.types.includes(t) ? o.types.filter(x => x !== t) : o.types.concat(t); draw(); });
+    read(); const n = arpanRows(D, o).length;
+    $('#ar-n', body).textContent = `${n} visit${n === 1 ? '' : 's'} · ${o.types.length === 1 && o.types[0] === ARPAN_POW ? 'ARPAN Campaign' : 'TASC Campaign'} format`;
+    $('#ar-go', body).disabled = !n;
+  };
+  $$('input,select', body).forEach(i => i.onchange = draw);
+  draw();
+  $('#ar-go', body).onclick = async () => {
+    const b = $('#ar-go', body); b.disabled = true; b.textContent = 'Preparing…'; read();
+    let out;
+    try { out = await arpanExcel(D, o); } catch (e) { toast(errText(e)); b.disabled = false; b.textContent = 'Make Excel'; return; }
+    shareReady(out);
+  };
+}
+async function arpanExcel(D, o) {
+  await loadScript('https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js');
+  const rows = arpanRows(D, o);
+  const arpan = o.types.length === 1 && o.types[0] === ARPAN_POW;
+  const kindWord = o.types.length !== 1 ? 'INSTITUTION' : o.types[0] === ARPAN_POW ? 'RELIGIOUS PLACE' : o.types[0].toUpperCase();
+  const asOn = new Date((o.to || todayISO()) + 'T00:00:00');
+  const asOnTxt = `${String(asOn.getDate()).padStart(2, '0')}/${String(asOn.getMonth() + 1).padStart(2, '0')}/${asOn.getFullYear()}`;
+  const dser = x => { const t = new Date(x); return (Date.UTC(t.getFullYear(), t.getMonth(), t.getDate(), t.getHours(), t.getMinutes()) - Date.UTC(1899, 11, 30)) / 864e5; };
+  const jointOf = id => all('joint').filter(j => j.visit_id === id).map(j => j.emp_id);
+  const who = e => { const p = S.dir.get(e) || {}; return [String(p.name || 'Emp ' + e).trim(), p.designation, p.branch].filter(Boolean).join(', '); };
+  const sentence = t => { t = String(t || '').trim(); return t && !/[.!?]$/.test(t) ? t + '.' : t; };
+  const outcomeText = v => {
+    const p = [sentence(v.outcome)];
+    if (v.remarks) p.push(sentence(v.remarks));
+    if (v.closure === 'account_opened') p.push(sentence(`Account opened${(v.account_numbers || []).length ? ` (${v.account_numbers.join(', ')})` : ''}${v.mobilised_rs ? `; ${inr(v.mobilised_rs)} mobilised` : ''}`));
+    else if (v.closure === 'existing_customer') { if ((v.existing_accounts || []).length) p.push(sentence(`Existing account: ${v.existing_accounts.join(', ')}`)); }
+    else if (v.closure) p.push(sentence(`Lead closed: ${closureLabel(v.closure)}`));
+    if (v.closure_note) p.push(sentence(v.closure_note));
+    if (!v.closure && (v.next_step || v.followup_on)) p.push(sentence(`Next: ${v.next_step || 'follow-up'}${v.followup_on ? ' on ' + fmtDate(v.followup_on) : ''}`));
+    return p.filter(Boolean).join(' ');
+  };
+  const head = ['ZONE', 'REGION', 'INSTITUTION NAME', 'VISIT DATE', 'VISIT MADE BY (CAC/MO/OTHER OFFICIALS OF BR/RO/ZO, WITH NAME & DESIGNATION', `NAME OF TRUSTEES/OFFICIALS OF ${kindWord} MET`, 'CONTACT NUMBER', 'OUTCOME'];
+  const filt = [o.types.length ? o.types.join(', ') : 'All types', o.br ? (D.branches.find(b => b.code === o.br) || {}).name : 'All branches', o.from ? `from ${fmtDate(o.from)}` : ''].filter(Boolean).join(' · ');
+  const aoa = [['CENTRAL BANK OF INDIA · REGIONAL OFFICE, UDAIPUR'], [`${arpan ? 'ARPAN' : 'TASC'} CAMPAIGN REPORTING FORMAT-VISIT/OUTCOME`], ['', '', `AS ON-${asOnTxt}`, '', '', '', filt], head,
+    ...rows.map(v => ['JAIPUR', 'UDAIPUR', v.entity.name, dser(v.visited_at),
+      [who(v.visitor), ...jointOf(v.id).map(e => 'with ' + who(e))].join('; '),
+      [v.person_name, v.person_designation].filter(Boolean).join(', '),
+      v.person_mobile ? String(v.person_mobile) : 'No. Not given', outcomeText(v)])];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [15.4, 12, 31.6, 23.4, 39.4, 32, 21, 99.1].map(w => ({ wch: w }));
+  ws['!rows'] = [{ hpt: 45.75 }, { hpt: 45.75 }, { hpt: 29.25 }, { hpt: 74.25 }];
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 7 } }, { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } }, { s: { r: 2, c: 6 }, e: { r: 2, c: 7 } }];
+  const thin = { style: 'thin', color: { rgb: '000000' } }, box = { top: thin, bottom: thin, left: thin, right: thin };
+  const cell = (r, c) => { const a = XLSX.utils.encode_cell({ r, c }); if (!ws[a]) ws[a] = { t: 's', v: '' }; return ws[a]; };
+  for (let c = 0; c < 8; c++) {
+    cell(0, c).s = { font: { name: 'Times New Roman', sz: 12, bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: box };
+    cell(1, c).s = { font: { name: 'Calibri', sz: 12, bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: box };
+    cell(2, c).s = { font: { name: 'Calibri', sz: 11, bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: box };
+    cell(3, c).s = { font: { name: 'Calibri', sz: 12, bold: true }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: box, fill: { fgColor: { rgb: 'D9E1F2' } } };
+  }
+  rows.forEach((v, i) => {
+    for (let c = 0; c < 8; c++) {
+      const x = cell(4 + i, c);
+      x.s = { font: { name: 'Calibri', sz: 11 }, alignment: { horizontal: c === 7 ? 'left' : 'center', vertical: 'center', wrapText: true }, border: box, ...(i % 2 ? { fill: { fgColor: { rgb: 'F7F9FC' } } } : {}) };
+      if (c === 3) { x.t = 'n'; x.z = 'dd-mmm-yyyy hh:mm'; }
+      if (c === 6) x.t = 's';
+    }
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, arpan ? 'ARPAN' : 'TASC');
+  const blob = new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const tag = o.types.length === 1 ? o.types[0].replace(/\s+/g, '-') : o.types.length ? 'Selected-types' : 'All-types';
+  const name = `${arpan ? 'ARPAN' : 'TASC'}-report-${tag}-${asOnTxt.replace(/\//g, '-')}.xlsx`;
+  const text = `*${arpan ? 'ARPAN' : 'TASC'} Campaign · Visit / outcome report* (as on ${asOnTxt})\n${filt}\n${rows.length} visit${rows.length === 1 ? '' : 's'} · Udaipur Region, Jaipur Zone\n\n– Regional Office, Udaipur`;
+  return { blob, name, text, kind: 'Excel', mime: blob.type, title: `${arpan ? 'ARPAN' : 'TASC'} Campaign report` };
 }
