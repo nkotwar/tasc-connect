@@ -783,7 +783,7 @@ async function arpanExcel(D, o) {
     if (!v.closure && (v.next_step || v.followup_on)) p.push(sentence(`Next: ${v.next_step || 'follow-up'}${v.followup_on ? ' on ' + fmtDate(v.followup_on) : ''}`));
     return p.filter(Boolean).join(' ');
   };
-  const head = ['ZONE', 'REGION', 'INSTITUTION NAME', 'VISIT DATE', 'VISIT MADE BY (CAC/MO/OTHER OFFICIALS OF BR/RO/ZO, WITH NAME & DESIGNATION', `NAME OF TRUSTEES/OFFICIALS OF ${kindWord} MET`, 'CONTACT NUMBER', 'OUTCOME'];
+  const head = ['ZONE', 'REGION', 'INSTITUTION NAME', 'VISIT DATE', 'VISIT MADE BY (CAC/MO/OTHER OFFICIALS OF BR/RO/ZO, WITH NAME & DESIGNATION', `NAME OF ${o.types.length === 1 && o.types[0] === 'Transport Operator' ? 'OWNER' : 'TRUSTEES'}/OFFICIALS OF ${kindWord} MET`, 'CONTACT NUMBER', 'OUTCOME'];
   const filt = [o.types.length ? o.types.join(', ') : 'All types', o.br ? (D.branches.find(b => b.code === o.br) || {}).name : 'All branches', o.from ? `from ${fmtDate(o.from)}` : ''].filter(Boolean).join(' · ');
   const aoa = [['CENTRAL BANK OF INDIA · REGIONAL OFFICE, UDAIPUR'], [`${arpan ? 'ARPAN' : 'TASC'} CAMPAIGN REPORTING FORMAT-VISIT/OUTCOME`], ['', '', `AS ON-${asOnTxt}`, '', '', '', filt], head,
     ...rows.map(v => ['JAIPUR', 'UDAIPUR', v.entity.name, dser(v.visited_at),
