@@ -21,11 +21,12 @@ async function openVisitForm(opts) {
     outcomeTouched: false, visit0: v,
     joint: new Set(opts.joint || []), photos: (opts.photos || []).map(p => ({ ...p, existing: true })), removed: []
   };
-  /* Admin can submit for someone else: their visit, their credit. Default: the person the place is allotted to. */
+  /* Admin (and staff the admin allowed) can submit for someone else: their visit, their credit. Default: the person the place is allotted to. */
   const myEmp = me ? me.emp_id : null;
   const allottee = (openAsgAll().find(a => a.entity_id === opts.entity.id && a.assignee !== myEmp) || {}).assignee;
-  F.visitor = v.id ? v.visitor : (opts.onBehalf || (S.who.admin && allottee && !opts.assignment ? allottee : myEmp));
-  F.pickVisitor = S.who.admin && F.isNew;
+  const forOthers = S.who.admin || canReportFor();
+  F.visitor = v.id ? v.visitor : (opts.onBehalf || (forOthers && allottee && !opts.assignment ? allottee : myEmp));
+  F.pickVisitor = forOthers && F.isNew;
   F.myEmp = myEmp;
   const no = v.visit_no || opts.nextNo || 1;
   const title = (F.isNew ? (no > 1 ? `Follow-up · Visit ${no}` : 'Submit Visit Report') : `Edit Visit ${no}`);
@@ -42,7 +43,7 @@ function formHTML(F, no) {
     <div class="hint">${esc(e.type)}${e.area ? ' · ' + esc(e.area) : ''}${no > 1 ? ` · Visit ${no}` : ''}</div></div>
 
   ${F.pickVisitor ? `<div class="fs"><h4>Visited by</h4><div id="f-vby"></div></div>`
-    : F.visitor !== F.myEmp ? `<div class="note" style="margin-bottom:14px">Report of <b>${esc(personName(F.visitor))}</b>${F.isNew ? '' : ', entered by the admin'}.</div>` : ''}
+    : F.visitor !== F.myEmp ? `<div class="note" style="margin-bottom:14px">Report of <b>${esc(personName(F.visitor))}</b>${!F.isNew && enteredBy(v) ? `, entered by ${esc(enteredBy(v))}` : ''}.</div>` : ''}
 
   <div class="fs"><h4>When &amp; where</h4>
     <label class="f" for="f-when">Date and time of visit</label>
@@ -173,7 +174,7 @@ function bindForm(body, F) {
     const p = S.dir.get(F.visitor) || {}, isMe = F.visitor === F.myEmp;
     const asgTo = openAsgAll().filter(a => a.entity_id === F.entity.id).map(a => a.assignee);
     const note = isMe ? '<p class="hint" style="margin:6px 0 0">Your own visit.</p>'
-      : `<p class="hint" style="margin:6px 0 0">Counts as <b>${esc(personName(F.visitor))}</b>'s visit and shows in their visits, marked "Entered by admin".${asgTo.length && !asgTo.includes(F.visitor) ? ` This place is allotted to ${asgTo.map(e => esc(personName(e))).join(', ')}: that allotment will show as visited by a colleague.` : ''}</p>`;
+      : `<p class="hint" style="margin:6px 0 0">Counts as <b>${esc(personName(F.visitor))}</b>'s visit and shows in their visits, marked as entered by you.${asgTo.length && !asgTo.includes(F.visitor) ? ` This place is allotted to ${asgTo.map(e => esc(personName(e))).join(', ')}: that allotment will show as visited by a colleague.` : ''}</p>`;
     el.innerHTML = searching ? `${searchHTML('f-vq', 'Name, Emp ID or branch', '')}<div class="list" id="f-vl"></div>`
       : `<div class="item" style="cursor:default"><div class="avatar">${esc(initials(isMe ? (S.who.me || {}).name || 'Me' : p.name || ''))}</div>
           <div class="grow"><div class="t">${isMe ? 'Me' : esc(cleanName(p.name || 'Emp ' + F.visitor))}</div><div class="s">${esc(p.designation || '')}${p.branch ? ' · ' + esc(p.branch) : ''}</div></div>

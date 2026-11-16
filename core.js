@@ -241,3 +241,8 @@ function glowSearch(root) {
   const on = $('.pseg button.on', root), pane = on ? $(`.pane[data-pane="${on.dataset.pid}"]`, root) : root;
   $$('.search.on', pane || root).forEach(b => { b.classList.remove('glow'); void b.offsetWidth; b.classList.add('glow'); });
 }
+
+/* Someone the admin allowed to submit visit reports for others (not the admin themself) */
+const canReportFor = () => !!(S.who && !S.who.admin && S.who.me && S.who.me.can_report_for);
+/* "Entered by …" for a report someone else entered (admin or a staff member with the switch on) */
+const enteredBy = v => v.entered_by ? personName(v.entered_by) : v.created_by_admin ? 'admin' : '';

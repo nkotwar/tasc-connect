@@ -307,7 +307,7 @@ async function openVisit(id) {
   if (!got.v.f) { body.innerHTML = emptyState(ICON.lock, 'Details not shared', 'Only the visitor, their branch head and the Regional Office see the full report.'); return; }
   const { v, photos, joint } = got, ent = v.entity;
   const me = S.who.me || {};
-  const mine = v.visitor === me.emp_id, back = v.status === 'returned', sub = v.status === 'submitted' || back, adm = S.who.admin;
+  const mine = v.visitor === me.emp_id, entered = !!me.emp_id && v.entered_by === me.emp_id, back = v.status === 'returned', sub = v.status === 'submitted' || back, adm = S.who.admin;
   const canVerify = v.status === 'submitted' && adm;   // only the Regional Office verifies
   $('.sheet-head h3').textContent = `${ent.name} · Visit ${v.visit_no}`;
   const urls = photos.length ? await signedUrls(photos.map(p => p.path)).catch(() => ({})) : {};
@@ -318,7 +318,7 @@ async function openVisit(id) {
     <div class="row wrap" style="margin-bottom:12px">
       <span class="badge ${v.status === 'verified' ? 'ok' : back ? 'bad' : 'warn'}">${v.status === 'verified' ? 'Verified' : back ? 'Sent back for changes' : 'Submitted, not yet verified'}</span>
       ${v.closure ? `<span class="badge ${v.closure === 'account_opened' ? 'ok' : v.closure === 'existing_customer' ? 'acc' : 'bad'}">${closureLabel(v.closure)}</span>` : ''}
-      ${v.assignment_id ? '<span class="badge acc">Allotted</span>' : '<span class="badge">Self-initiated</span>'}${v.created_by_admin ? '<span class="badge warn">Entered by admin</span>' : ''}</div>
+      ${v.assignment_id ? '<span class="badge acc">Allotted</span>' : '<span class="badge">Self-initiated</span>'}${enteredBy(v) ? `<span class="badge warn">Entered by ${esc(enteredBy(v))}</span>` : ''}</div>
     ${back ? `<div class="note bad" style="margin-bottom:12px"><b>Sent back by the Regional Office${v.returned_at ? ' · ' + fmtDateTime(v.returned_at) : ''}:</b> ${esc(v.return_note || '')}${mine ? '<br>Make the changes and save: it goes back for checking.' : ''}</div>`
       : v.resubmitted_at && v.status === 'submitted' ? `<div class="note" style="margin-bottom:12px">Resubmitted ${fmtDateTime(v.resubmitted_at)} after being sent back${v.return_note ? `: "${esc(v.return_note)}"` : ''}.</div>` : ''}
     ${photos.length ? `<div class="pgrid" style="margin-bottom:14px">${photos.map(p => `<a class="pthumb" href="${urls[p.path] || '#'}" target="_blank" rel="noopener"><img src="${turls[p.path] || urls[p.path] || ''}" alt="Visit photo" loading="lazy"><span class="ptag">${p.source === 'capture' ? 'Live' : 'Uploaded'}</span></a>`).join('')}</div>` : ''}
@@ -350,9 +350,9 @@ async function openVisit(id) {
 
   const acts = [];
   if (canVerify) acts.push(`<div class="row"><button class="btn grow" id="va-ver">✓ Verify</button><button class="btn ghost grow" id="va-back" style="color:var(--bad)">↩ Send back</button></div>`);
-  if (mine && sub) acts.push(`<button class="btn ${back ? '' : 'ghost'} block" id="va-edit">${back ? 'Edit and resubmit' : 'Edit'}</button>`);
-  if (mine && sub && !v.assignment_id && !v.created_by_admin) acts.push(`<button class="btn danger block" id="va-del">Delete</button>`);
-  if (mine && sub && (v.assignment_id || v.created_by_admin) && !pending) acts.push(`<button class="btn ghost block" id="va-rdel">Ask admin to delete</button>`);
+  if ((mine || entered) && sub) acts.push(`<button class="btn ${back ? '' : 'ghost'} block" id="va-edit">${back ? 'Edit and resubmit' : 'Edit'}</button>`);
+  if (mine && sub && !v.assignment_id && !v.created_by_admin && !v.entered_by) acts.push(`<button class="btn danger block" id="va-del">Delete</button>`);
+  if ((mine || entered) && sub && (v.assignment_id || v.created_by_admin || v.entered_by) && !pending) acts.push(`<button class="btn ghost block" id="va-rdel">Ask admin to delete</button>`);
   if (mine && !sub && !pending) acts.push(`<button class="btn ghost block" id="va-runv">Ask admin to unverify (to edit)</button>`);
   if (adm && !sub) acts.push(`<button class="btn ghost block" id="va-unv">Unverify</button>`);
   if (adm && !mine) acts.push(`<button class="btn danger block" id="va-adel">Delete visit (admin)</button>`);

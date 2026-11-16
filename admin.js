@@ -34,7 +34,7 @@ async function admVerify() {
     <div class="list">${rows.map(v => `<button class="item" data-v="${v.id}">
         <div class="avatar">${esc(initials(personName(v.visitor)))}</div>
         <div class="grow"><div class="t">${esc(v.entity.name)} · V${v.visit_no}</div>
-          <div class="s">${esc(personName(v.visitor))} · ${esc(bname.get(v.visitor_branch) || '')} · Submitted ${fmtDateTime(v.logged_at || v.visited_at)}</div></div>
+          <div class="s">${esc(personName(v.visitor))} · ${esc(bname.get(v.visitor_branch) || '')} · Submitted ${fmtDateTime(v.logged_at || v.visited_at)}${enteredBy(v) ? ` · <b>Entered by ${esc(enteredBy(v))}</b>` : ''}</div></div>
         <span class="chev">${ICON.chev}</span></button>`).join('')}</div>`
     : emptyState(ICON.shield, 'Nothing waiting', 'Every submitted visit report has been verified.');
   $$('[data-v]', admPane('verify')).forEach(b => b.onclick = () => openVisit(b.dataset.v));
@@ -242,6 +242,9 @@ function openPerson(emp) {
       <option value="admin" ${p.role === 'admin' ? 'selected' : ''}>Admin: full control</option>
     </select>
     ${isMe ? '<p class="hint">You can\'t change your own role.</p>' : ''}
+    ${p.role === 'admin' || p.can_report_for === undefined ? '' : `<label class="item" style="cursor:pointer;margin-top:10px"><div class="grow"><div class="t">Can submit reports for others</div>
+      <div class="s">Picks "Visited by" when submitting a report. The report counts as that person's visit, marked "Entered by ${esc(cleanName(p.name))}". No other admin powers.</div></div>
+      <input type="checkbox" id="rfo" ${p.can_report_for ? 'checked' : ''} style="width:22px;height:22px"></label>`}
 
     <h2>Access</h2>
     ${isMe ? '<p class="hint">You can\'t block yourself.</p>' : `<button class="btn block ${p.blocked ? 'soft' : 'danger'}" id="blk">${p.blocked ? 'Unblock: allow access again' : 'Block: cut off access on every device now'}</button>`}
@@ -259,6 +262,11 @@ function openPerson(emp) {
   };
   $('#role', body).onchange = async e => {
     try { await rpc('admin_set_role', { p_emp: emp, p_role: e.target.value }); await refresh('Role updated'); } catch (err) { toast(errText(err)); }
+  };
+  const rfo = $('#rfo', body);
+  if (rfo) rfo.onchange = async () => {
+    try { await rpc('admin_set_report_for', { p_emp: emp, p_on: rfo.checked }); await refresh(rfo.checked ? 'Can now submit reports for others' : 'Switched off'); }
+    catch (e) { rfo.checked = !rfo.checked; toast(errText(e)); }
   };
   const blk = $('#blk', body);
   if (blk) blk.onclick = async () => {
@@ -325,16 +333,18 @@ const ACT = {
   request_decided: (a) => `${a.detail?.approved ? 'approved' : 'declined'} a request`,
   assignment_reassigned: (a) => a.detail?.entity ? `reallotted ${esc(a.detail.entity)} to ${esc(cleanName(a.target_name || personName(+a.detail.to)))}` : 'reassigned a visit',
   place_reopened: () => 'reopened a closed place',
+  report_for_on: (a) => `allowed ${esc(cleanName(a.target_name || 'someone'))} to submit reports for others`,
+  report_for_off: (a) => `stopped ${esc(cleanName(a.target_name || 'someone'))} submitting reports for others`,
   place_duplicate: (a) => `marked ${esc(a.detail?.entity || 'a place')} as duplicate${a.detail?.note ? `: "${esc(a.detail.note)}"` : ''}`,
   place_not_duplicate: (a) => `marked ${esc(a.detail?.entity || 'a place')} as not duplicate`,
   place_deleted: (a) => `deleted the place ${esc(a.detail?.entity || '')}${a.detail?.visits ? ` with ${a.detail.visits} visit report${a.detail.visits > 1 ? 's' : ''}` : ''}`
 };
 /* What each filter shows */
 const ACT_KINDS = {
-  attention: ['Attention', ['claim_failed', 'person_blocked', 'person_unblocked', 'role_set', 'login_unlinked', 'place_deleted', 'place_duplicate', 'place_not_duplicate']],
+  attention: ['Attention', ['claim_failed', 'person_blocked', 'person_unblocked', 'role_set', 'login_unlinked', 'place_deleted', 'place_duplicate', 'place_not_duplicate', 'report_for_on', 'report_for_off']],
   all: ['All', null],
   visits: ['Visits', ['visit_logged', 'visit_verified', 'visit_unverified', 'visit_returned', 'visit_resubmitted', 'request_raised', 'request_decided']],
-  people: ['People', ['login_linked', 'login_unlinked', 'claim_failed', 'role_set', 'person_blocked', 'person_unblocked', 'directory_imported']],
+  people: ['People', ['login_linked', 'login_unlinked', 'claim_failed', 'role_set', 'person_blocked', 'person_unblocked', 'directory_imported', 'report_for_on', 'report_for_off']],
   places: ['Places', ['allotted', 'assignment_reassigned', 'place_reopened', 'place_deleted', 'place_duplicate', 'place_not_duplicate']]
 };
 /* A run of 3+ of these by the same person within 30 minutes shows as one line you can open */
