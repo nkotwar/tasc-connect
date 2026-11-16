@@ -179,6 +179,7 @@ async function viewDashboard(force = false) {
     <div class="card"><h3>Share &amp; export</h3>
       <div class="stack">
         <button class="btn block" id="dx-img">Summary image for WhatsApp</button>
+        <button class="btn ghost block" id="dx-pend">Staff-wise pendency (images for WhatsApp)</button>
         <button class="btn ghost block" id="dx-pdf">Pending visits, staff-wise (PDF)</button>
         <button class="btn ghost block" id="dx-arpan">Visit / outcome report (ARPAN format, Excel)</button>
         <button class="btn ghost block" id="dx-xls">Download Excel (all data)</button>
@@ -200,6 +201,7 @@ async function viewDashboard(force = false) {
   $('#dx-xls').onclick = () => exportExcel(M, D);
   $('#dx-arpan').onclick = () => askArpan(D);
   $('#dx-pdf').onclick = () => askPendingPdf(M, f, D);
+  $('#dx-pend').onclick = () => askPendencyImages(M, f, D);
   loadGallery(f, M);
 }
 
@@ -371,9 +373,13 @@ function askPendingPdf(M, f, D) {
 }
 
 /* The PDF is ready: share it (with the message) or download it. Sharing needs a fresh tap, so it gets its own button. */
-function shareReady({ blob, name, text, kind = 'PDF', mime = 'application/pdf', title = 'TASC Connect · Pending visits' }) {
+function shareReady({ blob, name, text, kind = 'PDF', mime = 'application/pdf', title = 'TASC Connect · Pending visits', files: parts }) {
+  parts = parts || [{ blob, name }];   // one file (PDF, summary image) or several images shared together
+  const kb = Math.max(1, Math.round(parts.reduce((n, q) => n + q.blob.size, 0) / 1024));
+  const urls = parts.length > 1 && mime.startsWith('image/') ? parts.map(q => URL.createObjectURL(q.blob)) : [];
   const body = openSheet(kind + ' ready', `
-    <p class="muted" style="margin-top:0">${esc(name)} · ${Math.max(1, Math.round(blob.size / 1024))} KB</p>
+    <p class="muted" style="margin-top:0">${parts.length > 1 ? `${parts.length} images` : esc(name)} · ${kb} KB</p>
+    ${urls.length ? `<div class="row" style="gap:8px;margin-bottom:10px;align-items:flex-start">${urls.map(u => `<img src="${u}" alt="" style="width:${Math.floor(100 / urls.length) - 3}%;max-height:160px;object-fit:cover;object-position:top;border-radius:8px;border:1px solid var(--line)">`).join('')}</div>` : ''}
     <label class="f">Message sent with it</label>
     <textarea class="input" id="pr-msg" rows="9" style="font-size:14px">${esc(text)}</textarea>
     <div class="stack" style="margin-top:12px">
@@ -383,14 +389,14 @@ function shareReady({ blob, name, text, kind = 'PDF', mime = 'application/pdf', 
     <p class="hint">If WhatsApp shows only the ${kind.toLowerCase()}, long-press in the chat and Paste: the message is copied when you share.</p>`);
   const msg = () => $('#pr-msg', body).value;
   const copy = async () => { try { await navigator.clipboard.writeText(msg()); return true; } catch (e) { return false; } };
-  const file = new File([blob], name, { type: mime });
-  const download = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); };
+  const fl = parts.map(q => new File([q.blob], q.name, { type: mime }));
+  const download = () => parts.forEach((q, i) => setTimeout(() => { const a = document.createElement('a'); a.href = URL.createObjectURL(q.blob); a.download = q.name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }, i * 500));
   $('#pr-copy', body).onclick = async () => toast(await copy() ? 'Message copied' : 'Could not copy. Select the text and copy it.');
   $('#pr-dl', body).onclick = () => { download(); toast(kind + ' downloaded'); };
   $('#pr-share', body).onclick = async () => {
     const copied = await copy();
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], text: msg(), title }); if (copied) toast('Shared. Message also copied, paste it if it is missing.', 3500); return; }
+    if (navigator.canShare && navigator.canShare({ files: fl })) {
+      try { await navigator.share({ files: fl, text: msg(), title }); if (copied) toast('Shared. Message also copied, paste it if it is missing.', 3500); return; }
       catch (e) { if (e.name === 'AbortError') return; }
     }
     download(); toast(copied ? kind + ' downloaded and message copied' : kind + ' downloaded', 3000);
@@ -602,6 +608,126 @@ async function summaryImage(M, f, D, withRO) {
     + `To view or submit your visits, open TASC Connect, tap *Sign in with your name*, select your name and enter your date of birth:\n`
     + `${daoraLink()}\n\n– Regional Office, Udaipur`;
   return { blob, name, text, kind: 'Image', mime: 'image/png', title: 'TASC Connect · Visit report' };
+}
+
+/* Staff-wise pendency: one compact table (branch · staff · allotted · visited · overdue) on 1 to 3 phone-sized images */
+function askPendencyImages(M, f, D) {
+  const body = openSheet('Staff-wise pendency (images)', `
+    <p class="muted" style="margin-top:0">Every officer's allotted, visited and overdue visits, branch by branch, on up to 3 images to share in the staff group. Follows the Type and Branch filters above.</p>
+    <label class="item" style="cursor:pointer"><div class="grow"><div class="t">Include Udaipur RO</div><div class="s">Regional Office staff</div></div>
+      <input type="checkbox" id="pi-ro" style="width:22px;height:22px"></label>
+    <div class="spacer"></div>
+    <button class="btn block" id="pi-go">Make images</button>`);
+  $('#pi-go', body).onclick = async () => {
+    const b = $('#pi-go', body); b.disabled = true; b.textContent = 'Preparing…';
+    let out;
+    try { out = await pendencyImages(M, f, D, $('#pi-ro', body).checked); }
+    catch (e) { toast(errText(e)); b.disabled = false; b.textContent = 'Make images'; return; }
+    shareReady(out);
+  };
+}
+
+async function pendencyImages(M, f, D, withRO) {
+  if (!withRO) M = dashModel(D, { ...f, noRO: true });   // leaves the Regional Office staff out
+  const ro = new Set(D.branches.filter(b => b.is_ro).map(b => b.code));
+  const offs = M.byOff.filter(o => o.total > 0);
+  const byB = new Map();
+  offs.forEach(o => { const bc = (S.dir.get(o.emp) || {}).branch_code;
+    if (!byB.has(bc)) byB.set(bc, { name: M.bname.get(bc) || o.branch || '—', ro: ro.has(bc), list: [] });
+    byB.get(bc).list.push(o); });
+  const groups = [...byB.values()].sort((a, b) => (b.ro - a.ro) || a.name.localeCompare(b.name));
+  groups.forEach(g => g.list.sort((a, b) => b.overdue - a.overdue || a.name.localeCompare(b.name)));
+  const T = offs.reduce((t, o) => ({ total: t.total + o.total, visited: t.visited + o.visited, overdue: t.overdue + o.overdue }), { total: 0, visited: 0, overdue: 0 });
+  const withOver = offs.filter(o => o.overdue).length;
+
+  // split into at most 3 images, keeping a branch on one image where possible
+  const R = offs.length, nP = R <= 38 ? 1 : R <= 86 ? 2 : 3, tgt = Math.ceil((R + 3) / nP);
+  const pages = [[]]; let cur = 0;
+  groups.forEach((g, gi) => {
+    const lim = pages.length === 1 ? tgt - 3 : tgt;
+    if (cur && cur + g.list.length > lim + 2 && pages.length < nP) { pages.push([]); cur = 0; }
+    g.list.forEach((o, k) => pages[pages.length - 1].push({ o, g, gi, first: k === 0 }));
+    cur += g.list.length;
+  });
+  pages.forEach(pg => { if (pg.length && !pg[0].first) pg[0].contd = true; });
+
+  try { await document.fonts.load('600 30px "IBM Plex Sans"'); await document.fonts.load('600 30px "IBM Plex Mono"'); } catch (e) { /* fallback fonts */ }
+  const logo = await new Promise(res => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = 'icon-192.png'; });
+  const sans = (w, s) => `${w} ${s}px "IBM Plex Sans", system-ui, sans-serif`, mono = (w, s) => `${w} ${s}px "IBM Plex Mono", monospace`;
+  const P = { bg: '#F3F5F8', card: '#FFFFFF', ink: '#142033', muted: '#5B6B80', faint: '#8A97A8', line: '#DCE2EA', zebra: '#F2F5F9', acc: '#146CC0', ok: '#12805C', bad: '#C2412D', badBg: '#FBE7E3', red: '#D20838' };
+  const W = 1080, PAD = 48, ROW = 46, now = new Date();
+  const when = now.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const scope = [f.camp && (D.camps.find(cc => cc.id === f.camp) || {}).name, f.type, f.branch && M.bname.get(f.branch)].filter(Boolean).join(' · ') || 'All visits';
+  const C = { br: PAD + 18, st: PAD + 272, al: 790, vi: 900, ov: W - PAD - 22 };
+  const out = [];
+  for (let pi = 0; pi < pages.length; pi++) {
+    const rows = pages[pi], last = pi === pages.length - 1, top = pi === 0 ? 330 : 196;
+    const H = top + 24 + rows.length * ROW + (last ? ROW + 16 : 40) + 110;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const x = c.getContext('2d');
+    const txt = (t, X, Y, o = {}) => { x.font = o.f || sans(400, 24); x.fillStyle = o.c || P.ink; x.textAlign = o.a || 'left'; x.textBaseline = 'alphabetic'; x.fillText(t, X, Y); };
+    const rr = (X, Y, w, h, r, fill) => { x.beginPath(); x.roundRect(X, Y, w, h, r); x.fillStyle = fill; x.fill(); };
+    const fit = (t, maxW, font) => { x.font = font; if (x.measureText(t).width <= maxW) return t; while (t.length > 3 && x.measureText(t + '…').width > maxW) t = t.slice(0, -1); return t + '…'; };
+    x.fillStyle = P.bg; x.fillRect(0, 0, W, H);
+    if (logo) x.drawImage(logo, PAD, 38, 64, 64);
+    txt('TASC Connect · Staff-wise pendency', PAD + 82, 78, { f: sans(700, 36) });
+    txt(fit(`Udaipur RO · ${scope} · as on ${when}`, W - PAD * 2 - 82 - 150, sans(400, 23)), PAD + 82, 110, { f: sans(400, 23), c: P.muted });
+    if (pages.length > 1) txt(`${pi + 1} of ${pages.length}`, W - PAD, 78, { f: sans(600, 24), c: P.muted, a: 'right' });
+    x.fillStyle = P.red; x.fillRect(PAD, 132, W - PAD * 2, 4);
+    if (pi === 0) {
+      const tw = (W - PAD * 2 - 3 * 16) / 4;
+      [[T.total, 'Allotted', P.ink], [`${T.visited} (${pct(T.visited, T.total)}%)`, 'Visited', P.ok], [T.overdue, 'Overdue', T.overdue ? P.bad : P.ink],
+        [`${withOver} of ${offs.length}`, 'Staff with overdue', withOver ? P.bad : P.ink]].forEach(([v, l, col], i) => {
+        const cx = PAD + i * (tw + 16), cy = 160;
+        rr(cx, cy, tw, 116, 16, P.card);
+        txt(fit(String(v), tw - 36, mono(600, 36)), cx + 20, cy + 58, { f: mono(600, 36), c: col });
+        txt(l, cx + 20, cy + 96, { f: sans(500, 22), c: P.muted });
+      });
+    }
+    // table
+    let y = top;
+    rr(PAD, y - 46, W - PAD * 2, H - (y - 46) - 84, 16, P.card);
+    const hd = sans(700, 22);
+    txt('Branch', C.br, y, { f: hd }); txt('Staff', C.st, y, { f: hd });
+    txt('Allotted', C.al, y, { f: hd, a: 'right' }); txt('Visited', C.vi, y, { f: hd, a: 'right' }); txt('Overdue', C.ov, y, { f: hd, a: 'right' });
+    y += 14; x.fillStyle = P.ink; x.fillRect(PAD + 10, y, W - PAD * 2 - 20, 2); y += 8;
+    rows.forEach((r, i) => {
+      const Y = y + i * ROW;
+      if (r.gi % 2) { x.fillStyle = P.zebra; x.fillRect(PAD + 10, Y, W - PAD * 2 - 20, ROW); }
+      if (r.first && i) { x.fillStyle = P.line; x.fillRect(PAD + 10, Y, W - PAD * 2 - 20, 2); }
+      const b = Y + ROW - 14, o = r.o;
+      if (r.first || r.contd) txt(fit(r.g.name + (r.contd ? ' (contd.)' : ''), C.st - C.br - 22, sans(600, 23)), C.br, b, { f: sans(600, 23), c: P.acc });
+      txt(fit(o.name, C.al - 100 - C.st, sans(500, 24)), C.st, b, { f: sans(500, 24) });
+      txt(String(o.total), C.al, b, { f: mono(500, 24), a: 'right' });
+      txt(String(o.visited), C.vi, b, { f: mono(500, 24), a: 'right', c: o.visited ? P.ok : P.faint });
+      if (o.overdue) {
+        x.font = mono(700, 24); const w = x.measureText(String(o.overdue)).width;
+        rr(C.ov - w - 14, Y + 7, w + 28, ROW - 14, 8, P.badBg);
+        txt(String(o.overdue), C.ov, b, { f: mono(700, 24), a: 'right', c: P.bad });
+      } else txt('0', C.ov, b, { f: mono(500, 24), a: 'right', c: P.ok });
+    });
+    y += rows.length * ROW;
+    if (last) {
+      x.fillStyle = P.ink; x.fillRect(PAD + 10, y + 2, W - PAD * 2 - 20, 2);
+      const b = y + ROW - 6;
+      txt(`Total · ${offs.length} staff`, C.br, b, { f: sans(700, 24) });
+      txt(String(T.total), C.al, b, { f: mono(700, 24), a: 'right' });
+      txt(String(T.visited), C.vi, b, { f: mono(700, 24), a: 'right', c: P.ok });
+      txt(String(T.overdue), C.ov, b, { f: mono(700, 24), a: 'right', c: T.overdue ? P.bad : P.ok });
+    } else txt('Continued on the next image ›', W - PAD - 18, H - 104, { f: sans(500, 21), c: P.faint, a: 'right' });
+    if (!rows.length) txt('No allotted visits for these filters.', W / 2, top + 60, { f: sans(600, 26), c: P.muted, a: 'center' });
+    txt('TASC Connect · Central Bank of India · via PDUDAIRO', W / 2, H - 36, { f: sans(500, 21), c: P.faint, a: 'center' });
+    const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+    out.push({ blob, name: `TASC-Connect-pendency-${todayISO()}${pages.length > 1 ? `-${pi + 1}of${pages.length}` : ''}.png` });
+  }
+  const day = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const text = `*TASC Connect · Staff-wise pendency* (${day})\n`
+    + `Allotted: ${T.total} · Visited: ${T.visited} (${pct(T.visited, T.total)}%) · Overdue: ${T.overdue}\n`
+    + (T.overdue ? `${withOver} of ${offs.length} staff have overdue visits.\n\n` : `\n`)
+    + `Please find your name in the list, complete your pending visits and submit the visit reports.\n`
+    + `To view or submit your visits, open TASC Connect, tap *Sign in with your name*, select your name and enter your date of birth:\n`
+    + `${daoraLink()}\n\n– Regional Office, Udaipur`;
+  return { blob: out[0].blob, name: out[0].name, files: out, text, kind: out.length > 1 ? 'Images' : 'Image', mime: 'image/png', title: 'TASC Connect · Staff-wise pendency' };
 }
 
 /* ───────── Excel export (SheetJS, loaded only when needed) ───────── */
