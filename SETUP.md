@@ -208,6 +208,7 @@ Profile (admins) shows photo storage used, out of the free 1 GB. At **800 MB** i
 | 69 | Admin can allow chosen staff to **submit reports for others** (Visits → People → person → "Can submit reports for others"). They get the "Visited by" picker; the report counts as that person's visit and is marked "Entered by Name" (report page, Verify list, Excel, Activity). Both the submitter and the visitor can edit it while unverified; neither can delete it. Visit rules still apply to them; no other admin powers | Run `sql/25_update_v69.sql`. Older app versions keep working (no picker until updated) |
 | 70 | Dashboard → **Staff-wise pendency (images for WhatsApp)**: every officer's allotted, visited and overdue visits, branch by branch, on 1 to 3 phone-sized images shared together with an editable message. Include Udaipur RO option (default off). No database change. |
 | 71 | Dashboard Excel: new **Staff by type** sheet. One row per officer (Emp ID, designation, branch), one column per place type, number of visits made (follow-ups included, sent-back left out), totals on the right and at the bottom. Filter Designation and the bottom totals follow the rows showing. No database change. |
+| 72 | Dashboard **Follow-ups due** card kept short: a one-line count (past their date / today), the 5 oldest, and **See all N follow-ups** opening a panel with search (place, officer, emp ID) and pills All / Past their date / Today. No database change. |
 
 ---
 

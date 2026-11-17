@@ -171,8 +171,9 @@ async function viewDashboard(force = false) {
         <button class="btn small soft" id="d-ver">Open Verify</button></div>` : '<p class="hint">Nothing waiting.</p>'}
     </div>` : ''}
 
-    ${M.followDue.length ? `<div class="card" id="fu-card" style="scroll-margin-top:70px"><h3>Follow-ups due</h3><div class="list">${M.followDue.slice(0, 30).map(v => `<button class="item" data-v="${v.id}"><div class="grow"><div class="t">${esc(v.entity.name)}</div>
-      <div class="s">${esc(personName(v.visitor))} · ${esc(v.next_step || 'Follow-up')}</div></div><span class="badge ${v.followup_on < M.today ? 'bad' : 'warn'}">${fmtDate(v.followup_on)}</span></button>`).join('')}</div></div>` : ''}
+    ${M.followDue.length ? `<div class="card" id="fu-card" style="scroll-margin-top:70px"><h3>Follow-ups due</h3>${fuSummary(M)}
+      <div class="list">${fuRows(M, M.followDue.slice(0, 5))}</div>
+      ${M.followDue.length > 5 ? `<button class="btn ghost block small" id="fuall" style="margin-top:10px">See all ${M.followDue.length} follow-ups ›</button>` : ''}</div>` : ''}
 
     <div class="card"><h3>Latest photos</h3><div class="pgrid pgrid3" id="gal"><div class="hint" style="grid-column:1/-1">Loading…</div></div></div>
 
@@ -197,6 +198,7 @@ async function viewDashboard(force = false) {
   $$('[data-br]').forEach(r => r.onclick = () => openBranch(+r.dataset.br));
   bindOfficers(M);
   $$('[data-v]', main).forEach(b => b.onclick = () => openVisit(b.dataset.v));
+  const fa = $('#fuall', main); if (fa) fa.onclick = () => openFollowups(M);
   $('#dx-img').onclick = () => askSummaryImage(M, f, D);
   $('#dx-xls').onclick = () => exportExcel(M, D);
   $('#dx-arpan').onclick = () => askArpan(D);
@@ -246,6 +248,39 @@ const OFF_SORT = {
   most: ['Most visits', (a, b) => (b.visited + b.own) - (a.visited + a.own) || a.name.localeCompare(b.name)],
   az: ['A–Z', (a, b) => a.name.localeCompare(b.name)]
 };
+/* Follow-ups due: the card shows the 5 oldest, the panel has them all with search and pills */
+function fuRows(M, list) {
+  return list.map(v => `<button class="item" data-v="${v.id}"><div class="grow"><div class="t">${esc(v.entity.name)}</div>
+      <div class="s">${esc(personName(v.visitor))} · ${esc(v.next_step || 'Follow-up')}</div></div><span class="badge ${v.followup_on < M.today ? 'bad' : 'warn'}">${fmtDate(v.followup_on)}</span></button>`).join('');
+}
+function fuSummary(M) {
+  const past = M.followDue.filter(v => v.followup_on < M.today).length, today = M.followDue.length - past;
+  return `<p class="hint" style="margin-top:0">${M.followDue.length} due${past ? ` · <b style="color:var(--bad)">${past} past their date</b>` : ''}${today ? ` · ${today} today` : ''} · oldest first</p>`;
+}
+function openFollowups(M) {
+  const st = S.cache.fuAll || (S.cache.fuAll = { q: '', f: 'all' });
+  const body = openSheet('Follow-ups due', `
+    ${searchHTML('fa-q', 'Place, officer or emp ID', st.q)}
+    <div class="chips" id="fa-f"></div>
+    <div class="hint sline" id="fa-s" hidden></div>
+    <div class="list" id="fa-l"></div>`);
+  const draw = () => {
+    st.q = $('#fa-q', body).value.trim();
+    const past = M.followDue.filter(v => v.followup_on < M.today), today = M.followDue.filter(v => v.followup_on >= M.today);
+    const base = st.f === 'past' ? past : st.f === 'today' ? today : M.followDue;
+    const t = st.q.toLowerCase();
+    const list = base.filter(v => !t || (v.entity.name + ' ' + personName(v.visitor) + ' ' + v.visitor).toLowerCase().includes(t));
+    $('#fa-f', body).innerHTML = [['all', 'All', M.followDue.length], ['past', 'Past their date', past.length], ['today', 'Today', today.length]]
+      .map(([k, l, n]) => `<button class="chip ${st.f === k ? 'on' : ''}" data-f="${k}">${l}<b>${n}</b></button>`).join('');
+    $$('#fa-f [data-f]', body).forEach(b => b.onclick = () => { st.f = b.dataset.f; draw(); });
+    searchSummary($('#fa-s', body), { shown: list.length, of: base.length, noun: 'follow-ups', filters: [st.f === 'past' && 'Past their date', st.f === 'today' && 'Today'], q: st.q,
+      onClear: () => { $('#fa-q', body).value = ''; $('#fa-q', body).dispatchEvent(new Event('input')); } });
+    $('#fa-l', body).innerHTML = list.length ? fuRows(M, list) : `<div class="empty">${t ? 'Nothing matches.' : 'None here.'}</div>`;
+    $$('[data-v]', $('#fa-l', body)).forEach(b => b.onclick = () => openVisit(b.dataset.v));
+  };
+  $('#fa-q', body).oninput = draw; bindSearch($('#fa-q', body), draw);
+  draw();
+}
 function openOfficers(M) {
   const st = S.cache.offAll || (S.cache.offAll = { q: '', br: '', f: 'due', sort: 'late' });
   const branches = M.byBranch.filter(b => M.byOff.some(o => (S.dir.get(o.emp) || {}).branch_code === b.code));
