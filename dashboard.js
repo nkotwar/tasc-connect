@@ -806,6 +806,28 @@ async function exportExcel(M, D) {
     { h: 'Visited', w: 10, t: 'int' }, { h: 'Overdue', w: 10, t: 'int' }, { h: 'Own visits (not allotted)', w: 13, t: 'int' }, { h: 'Avg delay (days)', w: 11, t: 'dec' }, { h: 'Done %', w: 9, t: 'pct' }], ofRows,
     ['Total', '', '', sum(ofRows, 3), sum(ofRows, 4), sum(ofRows, 5), sum(ofRows, 6), '', sum(ofRows, 3) ? sum(ofRows, 4) / sum(ofRows, 3) : 0]);
 
+  // Staff × place type: visits made (follow-ups included, sent-back left out), one column per type, totals on the right and at the bottom.
+  // The bottom totals use SUBTOTAL, so filtering (say, Designation = Marketing Officer) totals only the rows still showing.
+  const pv = M.vis.filter(v => v.status !== 'returned');
+  const pvTypes = [...pv.reduce((m, v) => m.set(v.entity.type, (m.get(v.entity.type) || 0) + 1), new Map())].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  const pvCount = new Map(); pv.forEach(v => { const k = v.visitor + '|' + v.entity.type; pvCount.set(k, (pvCount.get(k) || 0) + 1); });
+  const pvStaff = new Map(M.byOff.map(o => [o.emp, o])); pv.forEach(v => { if (!pvStaff.has(v.visitor)) pvStaff.set(v.visitor, { emp: v.visitor, name: personName(v.visitor) }); });
+  const pvRows = [...pvStaff.values()].map(o => { const p = S.dir.get(o.emp) || {};
+    const n = pvTypes.map(t => pvCount.get(o.emp + '|' + t) || 0);
+    return [cleanName(p.name || o.name || 'Emp ' + o.emp), o.emp, p.designation || '', p.branch || '', ...n.map(x => x || ''), n.reduce((a, b) => a + b, 0)]; })
+    .sort((a, b) => b[b.length - 1] - a[a.length - 1] || a[0].localeCompare(b[0]));
+  const pvTot = ['Total (rows showing)', '', '', '', ...pvTypes.map((t, j) => sum(pvRows, 4 + j)), sum(pvRows, 4 + pvTypes.length)];
+  const wsPv = table('Visits by staff and place type', [{ h: 'Officer', w: 28, t: 'text' }, { h: 'Emp ID', w: 9, t: 'int' }, { h: 'Designation', w: 22, t: 'text' }, { h: 'Branch', w: 20, t: 'text' },
+    ...pvTypes.map(t => ({ h: t, w: Math.max(10, Math.min(16, t.length + 2)), t: 'int' })), { h: 'Total', w: 9, t: 'int' }], pvRows, pvTot);
+  if (pvRows.length) {
+    const tr = 4 + pvRows.length;   // 0-based row of the totals line; data rows are Excel rows 5 to tr
+    for (let j = 4; j < 5 + pvTypes.length; j++) {
+      const col = XLSX.utils.encode_col(j), a = XLSX.utils.encode_cell({ r: tr, c: j });
+      wsPv[a].f = `SUBTOTAL(109,${col}5:${col}${tr})`;
+    }
+    for (let i = 0; i < pvRows.length; i++) { const a = XLSX.utils.encode_cell({ r: 4 + i, c: 4 + pvTypes.length }); wsPv[a].s = { ...wsPv[a].s, font: { bold: true } }; }
+  }
+
   // Allotments
   const alRows = M.rows.slice().sort((a, b) => (a.a.scheduled_on || '').localeCompare(b.a.scheduled_on || '')).map(r => [
     r.a.entity.name, r.a.entity.type, r.a.entity.area || '', personName(r.a.assignee), r.a.assignee, (S.dir.get(r.a.assignee) || {}).branch || '',
@@ -838,6 +860,7 @@ async function exportExcel(M, D) {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, wsSum, 'Summary');
+  XLSX.utils.book_append_sheet(wb, wsPv, 'Staff by type');
   XLSX.utils.book_append_sheet(wb, wsBr, 'Branches');
   XLSX.utils.book_append_sheet(wb, wsOf, 'Officers');
   XLSX.utils.book_append_sheet(wb, wsAl, 'Allotments');
