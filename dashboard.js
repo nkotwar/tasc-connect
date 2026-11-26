@@ -865,10 +865,11 @@ async function exportExcel(M, D) {
 
   // Allotments
   const alRows = M.rows.slice().sort((a, b) => (a.a.scheduled_on || '').localeCompare(b.a.scheduled_on || '')).map(r => [
-    r.a.entity.name, r.a.entity.type, r.a.entity.area || '', personName(r.a.assignee), r.a.assignee, (S.dir.get(r.a.assignee) || {}).branch || '',
+    r.a.entity.name, r.a.entity.type, r.a.entity.area || '', r.a.entity.contact_person || '', r.a.entity.contact || '', r.a.entity.address || '', personName(r.a.assignee), r.a.assignee, (S.dir.get(r.a.assignee) || {}).branch || '',
     d(r.a.scheduled_on), st[r.st], r.v ? d(r.v.visited_at) : '', r.v ? personName(r.v.visitor) : '', r.delay != null ? r.delay : (r.st === 'overdue' ? r.late : ''),
     r.v ? (r.v.outcome || '') : '', r.v ? closureLabel(r.v.closure) || '' : '', r.a.note || '']);
-  const wsAl = table('Allotments', [{ h: 'Place', w: 40, t: 'text' }, { h: 'Type', w: 20, t: 'text' }, { h: 'Area', w: 16, t: 'text' }, { h: 'Officer', w: 26, t: 'text' },
+  const wsAl = table('Allotments', [{ h: 'Place', w: 40, t: 'text' }, { h: 'Type', w: 20, t: 'text' }, { h: 'Area', w: 16, t: 'text' },
+    { h: 'Contact person', w: 22, t: 'text' }, { h: 'Contact', w: 26, t: 'text' }, { h: 'Address', w: 40, t: 'text' }, { h: 'Officer', w: 26, t: 'text' },
     { h: 'Emp ID', w: 9, t: 'int' }, { h: 'Officer branch', w: 18, t: 'text' }, { h: 'Visit by', w: 13, t: 'date' }, { h: 'Status', w: 22, t: 'text', tint: true },
     { h: 'Visited on', w: 17, t: 'dt' }, { h: 'Visited by', w: 24, t: 'text' }, { h: 'Delay (days)', w: 10, t: 'int' }, { h: 'Outcome', w: 18, t: 'text' },
     { h: 'Closure', w: 16, t: 'text', tint: true }, { h: 'Note for staff', w: 30, t: 'text' }], alRows);
@@ -879,7 +880,7 @@ async function exportExcel(M, D) {
   const viRows = M.vis.slice().sort((a, b) => a.visited_at.localeCompare(b.visited_at)).map(v => [
     v.entity.name, v.entity.type, v.entity.area || '', v.visit_no, personName(v.visitor), v.visitor, M.bname.get(v.visitor_branch) || '',
     d(v.visited_at), d(v.logged_at), enteredBy(v), v.assignment_id ? 'Yes' : 'No', jointOf(v.id),
-    v.person_name || '', v.person_designation || '', v.person_mobile || '',
+    v.person_name || '', v.person_designation || '', v.person_mobile || '', v.entity.contact_person || '', v.entity.contact || '',
     { us: 'Our bank', other: 'Other bank', none: 'None / not known' }[v.banking_with] || '', v.other_bank || '',
     v.potential_rs != null ? +v.potential_rs : '', (v.products || []).join(', '), v.outcome || '', v.remarks || '', v.next_step || '',
     d(v.followup_on) || '', closureLabel(v.closure) || '', (v.account_numbers || []).join(', '), (v.existing_accounts || []).join(', '), v.mobilised_rs != null ? +v.mobilised_rs : '',
@@ -888,7 +889,7 @@ async function exportExcel(M, D) {
   const wsVi = table('Visit reports', [{ h: 'Place', w: 40, t: 'text' }, { h: 'Type', w: 20, t: 'text' }, { h: 'Area', w: 16, t: 'text' }, { h: 'Visit no', w: 8, t: 'int' },
     { h: 'Visited by', w: 26, t: 'text' }, { h: 'Emp ID', w: 9, t: 'int' }, { h: 'Branch', w: 18, t: 'text' }, { h: 'Visited at', w: 17, t: 'dt' }, { h: 'Submitted at', w: 17, t: 'dt' }, { h: 'Entered by', w: 22, t: 'text' },
     { h: 'Allotted', w: 9, t: 'text' }, { h: 'Joint visit with', w: 24, t: 'text' }, { h: 'Person met', w: 22, t: 'text' }, { h: 'Designation', w: 18, t: 'text' },
-    { h: 'Mobile', w: 13, t: 'text' }, { h: 'Banks with', w: 14, t: 'text' }, { h: 'Other bank', w: 16, t: 'text' }, { h: 'Potential', w: 14, t: 'inr' },
+    { h: 'Mobile', w: 13, t: 'text' }, { h: 'Place contact person', w: 22, t: 'text' }, { h: 'Place contact', w: 26, t: 'text' }, { h: 'Banks with', w: 14, t: 'text' }, { h: 'Other bank', w: 16, t: 'text' }, { h: 'Potential', w: 14, t: 'inr' },
     { h: 'Products', w: 30, t: 'text' }, { h: 'Outcome', w: 18, t: 'text' }, { h: 'Remarks', w: 40, t: 'text' }, { h: 'Next step', w: 30, t: 'text' },
     { h: 'Follow-up on', w: 13, t: 'date' }, { h: 'Closure', w: 16, t: 'text', tint: true }, { h: 'Accounts opened', w: 22, t: 'text' }, { h: 'Existing accounts', w: 22, t: 'text' }, { h: 'Mobilised', w: 14, t: 'inr' },
     { h: 'Photos', w: 8, t: 'int' }, { h: 'Location (lat, long)', w: 22, t: 'text' }, { h: 'Status', w: 12, t: 'text', tint: true }, { h: 'Verified at', w: 17, t: 'dt' }, { h: 'Verified by', w: 22, t: 'text' }], viRows);

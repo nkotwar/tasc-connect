@@ -209,6 +209,7 @@ Profile (admins) shows photo storage used, out of the free 1 GB. At **800 MB** i
 | 70 | Dashboard → **Staff-wise pendency (images for WhatsApp)**: every officer's allotted, visited and overdue visits, branch by branch, on 1 to 3 phone-sized images shared together with an editable message. Include Udaipur RO option (default off). No database change. |
 | 71 | Dashboard Excel: new **Staff by type** sheet. One row per officer (Emp ID, designation, branch), one column per place type, number of visits made (follow-ups included, sent-back left out), totals on the right and at the bottom. Filter Designation and the bottom totals follow the rows showing. No database change. |
 | 72 | Dashboard **Follow-ups due** card kept short: a one-line count (past their date / today), the 5 oldest, and **See all N follow-ups** opening a panel with search (place, officer, emp ID) and pills All / Past their date / Today. No database change. |
+| 73 | Dashboard Excel: **Allotments** sheet gets the place's Contact person, Contact and Address (after Area); **Visit reports** sheet gets Place contact person and Place contact (after Mobile). ARPAN format unchanged. No database change. |
 
 ---
 
