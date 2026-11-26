@@ -88,7 +88,7 @@ function dashModel(D, f) {
   // verification pending (only the admin verifies)
   const waitingV = vis.filter(v => v.status === 'submitted');
   const waitOldest = waitingV.reduce((m, v) => !m || v.logged_at < m ? v.logged_at : m, null);
-  return { today, tmr, rows, vis, n, visited, ageing, delays, onTime, avgDelay, followDue, biz, outcomes, products, banking, otherBanks,
+  return { okA, today, tmr, rows, vis, n, visited, ageing, delays, onTime, avgDelay, followDue, biz, outcomes, products, banking, otherBanks,
     byBranch: [...byBranch.values()].sort((a, b) => (b.ro - a.ro) || a.name.localeCompare(b.name)),   // Udaipur RO first, then A–Z
     byOff: [...byOff.values()].sort((a, b) => b.overdue - a.overdue || b.today - a.today || a.name.localeCompare(b.name)),
     byType, waiting: waitingV.length, waitOldest, bname };
@@ -874,6 +874,18 @@ async function exportExcel(M, D) {
     { h: 'Visited on', w: 17, t: 'dt' }, { h: 'Visited by', w: 24, t: 'text' }, { h: 'Delay (days)', w: 10, t: 'int' }, { h: 'Outcome', w: 18, t: 'text' },
     { h: 'Closure', w: 16, t: 'text', tint: true }, { h: 'Note for staff', w: 30, t: 'text' }], alRows);
 
+  // Removed allotments (cancelled on an approved "remove" request), with the reason the officer gave.
+  // Requests reach the admin's phone only, so in a viewer's download the Reason column stays blank.
+  const rmWhy = new Map(all('requests').filter(r => r.kind === 'delete_assignment' && r.status === 'approved' && r.assignment_id)
+    .sort((a, b) => (a.decided_at || '').localeCompare(b.decided_at || '')).map(r => [r.assignment_id, r.reason]));
+  const rmRows = all('assignments').filter(a => a.status === 'cancelled').map(withEntity).filter(M.okA)
+    .sort((a, b) => (b.scheduled_on || '').localeCompare(a.scheduled_on || '')).map(a => [
+      a.entity.name, a.entity.type, a.entity.area || '', a.entity.contact_person || '', a.entity.contact || '',
+      personName(a.assignee), a.assignee, (S.dir.get(a.assignee) || {}).branch || '', d(a.scheduled_on), rmWhy.get(a.id) || '']);
+  const wsRm = table('Removed allotments', [{ h: 'Place', w: 40, t: 'text' }, { h: 'Type', w: 20, t: 'text' }, { h: 'Area', w: 16, t: 'text' },
+    { h: 'Contact person', w: 22, t: 'text' }, { h: 'Contact', w: 26, t: 'text' }, { h: 'Officer', w: 26, t: 'text' }, { h: 'Emp ID', w: 9, t: 'int' },
+    { h: 'Officer branch', w: 18, t: 'text' }, { h: 'Was scheduled for', w: 13, t: 'date' }, { h: 'Reason', w: 50, t: 'text' }], rmRows);
+
   // Visit reports (full details)
   const jointOf = id => all('joint').filter(j => j.visit_id === id).map(j => personName(j.emp_id)).join(', ');
   const photosOf = id => all('photos').filter(p => p.visit_id === id).length;
@@ -900,6 +912,7 @@ async function exportExcel(M, D) {
   XLSX.utils.book_append_sheet(wb, wsBr, 'Branches');
   XLSX.utils.book_append_sheet(wb, wsOf, 'Officers');
   XLSX.utils.book_append_sheet(wb, wsAl, 'Allotments');
+  XLSX.utils.book_append_sheet(wb, wsRm, 'Removed allotments');
   XLSX.utils.book_append_sheet(wb, wsVi, 'Visit reports');
   XLSX.writeFile(wb, `TASC-Connect-${todayISO()}.xlsx`);
   toast('Excel downloaded');
